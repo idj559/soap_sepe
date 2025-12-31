@@ -1,174 +1,148 @@
 <?php
+/**
+ * Endpoint del Servicio Web SOAP para el SEPE.
+ */
+
+// 1. CARGA DE CONFIGURACIÓN
 require_once(__DIR__ . '/../../config.php');
-require_once(__DIR__ . '/lib.php');
 
-// Configurar el encabezado SOAP
+// 2. BLINDAJE DE SALIDA (CRÍTICO PARA EL VALIDADOR JAVA)
+// Desactivamos cualquier mensaje de error visible de PHP o Moodle
+// para asegurar que SOLO se envía XML limpio.
+@error_reporting(0);
+@ini_set('display_errors', '0');
+$CFG->debug = 0; // Apagar modo debug de Moodle temporalmente para este script
+
+// Limpiamos cualquier buffer que Moodle haya podido abrir (espacios en blanco, warnings)
+while (ob_get_level()) ob_end_clean();
+
+// Iniciamos nuestro propio buffer para capturar salidas inesperadas
+ob_start();
+
+use local_soap_sepe\soap_server;
+use local_soap_sepe\sepe_manager;
+
+$xml_input = file_get_contents('php://input');
+
+// Comprobación de navegador (GET)
+if (empty($xml_input)) {
+    ob_end_clean(); // Limpiar buffer
+    header('Content-Type: text/plain; charset=utf-8');
+    die('Endpoint Activo. Esperando peticiones SOAP XML.');
+}
+
+// Preparar cabeceras SOAP
 header('Content-Type: text/xml; charset=utf-8');
+header('Cache-Control: no-cache, no-store, must-revalidate');
 
-// Capturar el cuerpo de la solicitud SOAP
-$requestXML = file_get_contents('php://input');
+try {
+    // 3. INSTANCIAR CLASES
+    $server = new soap_server($xml_input);
+    $server->validate_security(); // Validar usuario/pass
 
-// Validar las credenciales desde la solicitud SOAP
-if (!validate_credentials($requestXML)) {
-    $responseDOM = new DOMDocument('1.0', 'UTF-8');
-    $responseDOM->formatOutput = true;
-
-    // Nodo raíz SOAP
-    $envelope = $responseDOM->createElement('soapenv:Envelope');
-    $envelope->setAttribute('xmlns:soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-    $envelope->setAttribute('xmlns:soapenc', 'http://schemas.xmlsoap.org/soap/encoding/');
-    $envelope->setAttribute('xmlns:xsd', 'http://www.w3.org/2001/XMLSchema');
-    $envelope->setAttribute('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance');
-    $responseDOM->appendChild($envelope);
-
-    // Cuerpo del mensaje SOAP
-    $body = $responseDOM->createElement('soapenv:Body');
-    $envelope->appendChild($body);
-
-    // Nodo de respuesta principal
-    $obtenerDatosCentroResponse = $responseDOM->createElement('p867:obtenerDatosCentroResponse');
-    $obtenerDatosCentroResponse->setAttribute('xmlns:p867', 'http://impl.ws.application.proveedorcentro.meyss.spee.es');
-
-    $body->appendChild($obtenerDatosCentroResponse);
-
-    $respuesta = $responseDOM->createElement('p148:RESPUESTA_DATOS_CENTRO');
-    $respuesta->setAttribute('xmlns:p465', 'http://entsal.bean.domain.common.proveedorcentro.meyss.spee.es');
-    $respuesta->setAttribute('xmlns:p148', 'http://salida.bean.domain.common.proveedorcentro.meyss.spee.es');
-
-    $obtenerDatosCentroResponse->appendChild($respuesta);
-
-    // Nodo CODIGO_RETORNO
-    $respuesta->appendChild($responseDOM->createElement('CODIGO_RETORNO', '-1'));
-
-    // Nodo ETIQUETA_ERROR
-    $etiquetaErrorNode = $responseDOM->createElement('ETIQUETA_ERROR', '');
-    $etiquetaErrorNode->setAttribute('xsi:nil', 'true');
+    $action = $server->get_action();
+    $manager = new sepe_manager();
     
-    $respuesta->appendChild($etiquetaErrorNode);
+    $response_xml = '';
+    $retorno = 0; 
 
-    echo $responseDOM->saveXML();
-
-    //echo createErrorResponse('Credenciales inválidas');
-}else{
-    // Procesar la solicitud SOAP y devolver la respuesta
-    $responseXML = processSoapRequest($requestXML);
-    echo $responseXML;
-}
-
-function validate_credentials($requestXML) {
-    global $DB;
-
-    $dom = new DOMDocument();
-    $dom->loadXML($requestXML);
-
-    // Extraer el nodo UsernameToken del encabezado SOAP
-    $xpath = new DOMXPath($dom);
-    $xpath->registerNamespace('wsse', 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd');
-    $usernameNode = $xpath->query('//wsse:Username')->item(0);
-    $passwordNode = $xpath->query('//wsse:Password')->item(0);
-
-    if (!$usernameNode || !$passwordNode) {
-        return false; // Credenciales no presentes
-    }
-
-    $username = $usernameNode->nodeValue;
-    $password = $passwordNode->nodeValue;
-
-    // Verificar las credenciales contra la base de datos
-    $user = $DB->get_record('user', ['username' => $username]);
-
-    if (!$user || !password_verify($password, $user->password)) {
-        return false; // Credenciales inválidas
-    }
-
-    return true; // Credenciales válidas
-}
-
-
-function createErrorResponse($errorMessage) {
-    $responseDOM = new DOMDocument('1.0', 'UTF-8');
-    $responseDOM->formatOutput = true;
-
-    $envelope = $responseDOM->createElement('soapenv:Envelope');
-    $envelope->setAttribute('xmlns:soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-    $responseDOM->appendChild($envelope);
-
-    $body = $responseDOM->createElement('soapenv:Body');
-    $envelope->appendChild($body);
-
-    $fault = $responseDOM->createElement('soapenv:Fault');
-    $body->appendChild($fault);
-
-    $faultCode = $responseDOM->createElement('faultcode', 'Client');
-    $faultString = $responseDOM->createElement('faultstring', $errorMessage);
-    $fault->appendChild($faultCode);
-    $fault->appendChild($faultString);
-
-    return $responseDOM->saveXML();
-}
-
-
-// Procesar la solicitud y determinar la función a invocar
-function processSoapRequest($requestXML) {
-    // Cargar la solicitud SOAP en un DOMDocument
-    $dom = new DOMDocument();
-    $dom->loadXML($requestXML);
-
-    // Extraer el nombre del método solicitado
-    $xpath = new DOMXPath($dom);
-    $xpath->registerNamespace('soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-    $methodNode = $xpath->query('//soapenv:Body/*')->item(0);
-
-    if (!$methodNode) {
-        // Si no se encuentra un método, devolver un error SOAP
-        return generateSoapFault('Client', 'Método SOAP no encontrado.');
-    }
-
-    $methodName = $methodNode->localName;
-
-    // Enrutamiento a la función correspondiente
-    switch ($methodName) {
-        case 'crearAccion':
-            return local_crear_accion_process_request($requestXML);
+    // 4. ENRUTAMIENTO
+    switch ($action) {
         case 'crearCentro':
-            return local_crear_centro_process_request($requestXML);
+            $data = $server->get_body_data_as_array();
+            try {
+                $manager->crear_centro($data);
+                $datos = $manager->obtener_datos_centro();
+            } catch (Exception $e) {
+                $retorno = 1; 
+                // Loguear error internamente, pero NO imprimirlo
+                error_log('SEPE crearCentro Error: ' . $e->getMessage());
+                $datos = [];
+            }
+            $response_xml = $server->generate_response_datos_centro('crearCentro', $retorno, $datos);
+            break;
+
         case 'obtenerDatosCentro':
-            return local_obtener_datos_centro_process_request($requestXML);
-        case 'obtenerListaAcciones':
-            return local_obtener_lista_acciones_process_request($requestXML);
+            try {
+                $datos = $manager->obtener_datos_centro();
+                if (!$datos) $retorno = 1;
+            } catch (Exception $e) {
+                $retorno = 1;
+                $datos = [];
+            }
+            $response_xml = $server->generate_response_datos_centro('obtenerDatosCentro', $retorno, $datos);
             break;
+
+        case 'crearAccion':
+            $data = $server->get_body_data_as_array();
+            // Normalizar: a veces llega directo, a veces envuelto
+            $accion = $data['ACCION_FORMATIVA'] ?? $data;
+            try {
+                $manager->crear_accion($accion);
+            } catch (Exception $e) {
+                $retorno = 1;
+                error_log('SEPE crearAccion Error: ' . $e->getMessage());
+            }
+            // Devolver los mismos datos como confirmación (requisito SEPE)
+            $response_xml = $server->generate_response_accion('crearAccion', $retorno, $accion);
+            break;
+
         case 'obtenerAccion':
-            return local_obtener_accion_process_request($requestXML);
+            $data = $server->get_body_data_as_array();
+            $id = $data['ID_ACCION'] ?? $data;
+            try {
+                $res = $manager->obtener_accion($id);
+                if (!$res) $retorno = 1; // 1 = No encontrado / Error
+            } catch (Exception $e) {
+                $retorno = 1;
+                $res = [];
+                error_log('SEPE obtenerAccion Error: ' . $e->getMessage());
+            }
+            $response_xml = $server->generate_response_accion('obtenerAccion', $retorno, $res);
             break;
+
         case 'eliminarAccion':
-            return local_eliminar_accion_process_request($requestXML);
+            $data = $server->get_body_data_as_array();
+            $id = $data['ID_ACCION'] ?? $data;
+            try {
+                $manager->eliminar_accion($id);
+            } catch (Exception $e) {
+                $retorno = 1;
+                error_log('SEPE eliminarAccion Error: ' . $e->getMessage());
+            }
+            $response_xml = $server->generate_response_eliminar($retorno);
             break;
+            
+        case 'obtenerListaAcciones':
+             try {
+                $lista = $manager->obtener_lista_acciones();
+             } catch (Exception $e) {
+                $retorno = 1;
+                $lista = [];
+                error_log('SEPE obtenerListaAcciones Error: ' . $e->getMessage());
+             }
+             $response_xml = $server->generate_response_lista($retorno, $lista);
+             break;
+
         default:
-            // Si no hay un método correspondiente, devolver un error SOAP
-            return generateSoapFault('Client', "Método SOAP desconocido: $methodName");
+            throw new Exception("Operación desconocida: $action");
+    }
+
+    // Limpiamos cualquier basura que se haya generado en el buffer antes de enviar el XML
+    ob_clean();
+    echo $response_xml;
+
+} catch (Throwable $e) { // 'Throwable' captura Errores Fatales de PHP 7+ y Excepciones
+    ob_clean(); // Limpiar basura antes del error
+    http_response_code(500); // Avisar al cliente de fallo servidor
+    
+    // Loguear el error real en el archivo de logs del servidor
+    error_log('SEPE FATAL ERROR: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+
+    // Devolver un XML de fallo válido para que el cliente Java no cierre conexión de golpe
+    if (isset($server)) {
+        echo $server->generate_fault('Error interno del servidor. Contacte con soporte.');
+    } else {
+        echo '<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><soapenv:Fault><faultcode>Server</faultcode><faultstring>Critical Error</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>';
     }
 }
-
-// Función para generar una respuesta de fallo SOAP
-function generateSoapFault($faultCode, $faultString) {
-    $responseDOM = new DOMDocument('1.0', 'UTF-8');
-    $responseDOM->formatOutput = true;
-
-    // Crear la estructura SOAP Fault
-    $envelope = $responseDOM->createElement('soapenv:Envelope');
-    $envelope->setAttribute('xmlns:soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-    $responseDOM->appendChild($envelope);
-
-    $body = $responseDOM->createElement('soapenv:Body');
-    $envelope->appendChild($body);
-
-    $fault = $responseDOM->createElement('soapenv:Fault');
-    $body->appendChild($fault);
-
-    $fault->appendChild($responseDOM->createElement('faultcode', $faultCode));
-    $fault->appendChild($responseDOM->createElement('faultstring', $faultString));
-
-    return $responseDOM->saveXML();
-}
-
-

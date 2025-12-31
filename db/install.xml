@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="local/soap_sepe/db" VERSION="20250929" COMMENT="XMLDB file for Moodle local_soap_sepe"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
+>
+  <TABLES>
+    <TABLE NAME="sepeservice_centro" COMMENT="Tabla de centros SEPE">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="origen_centro" TYPE="char" LENGTH="2" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="codigo_centro" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="nombre_centro" TYPE="char" LENGTH="40" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="url_plataforma" TYPE="text" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="url_seguimiento" TYPE="text" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="telefono" TYPE="char" LENGTH="15" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="email" TYPE="char" LENGTH="250" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_tutor_empresa" COMMENT="Tutores de empresa">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="tipo_documento" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="num_documento" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="letra_nif" TYPE="char" LENGTH="1" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="unique_doc" TYPE="unique" FIELDS="num_documento"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_tutor_formador" COMMENT="Tutores formadores">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="tipo_documento" TYPE="char" LENGTH="1" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="num_documento" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="letra_nif" TYPE="char" LENGTH="1" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="acreditacion_tutor" TYPE="char" LENGTH="500" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="experiencia_profesional" TYPE="char" LENGTH="3" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="competencia_docente" TYPE="char" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="experiencia_modalidad_teleformacion" TYPE="char" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="formacion_modalidad_teleformacion" TYPE="char" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_accion_formativa" COMMENT="Acciones formativas">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="origen_accion" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="codigo_accion" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="situacion" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="origen_especialidad" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="area_profesional" TYPE="char" LENGTH="50" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="codigo_especialidad" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="duracion" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_inicio" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_fin" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="ind_itinerario_completo" TYPE="char" LENGTH="2" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="tipo_financiacion" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="numero_asistentes" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="denominacion_accion" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="informacion_general" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="horarios" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="requisitos" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="contacto_accion" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="id_centro" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="unique_codigo" TYPE="unique" FIELDS="codigo_accion"/>
+        <KEY NAME="fk_centro" TYPE="foreign" FIELDS="id_centro" REFTABLE="sepeservice_centro" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_centro_presencial" COMMENT="Centros presenciales">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="origen_centro" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="codigo_centro" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="unique_codigo" TYPE="unique" FIELDS="codigo_centro"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_contrato_formacion" COMMENT="Contratos de formacion">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_contrato_cfa" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="cif_empresa" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_tutor_empresa" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="id_tutor_formacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_tutoremp" TYPE="foreign" FIELDS="id_tutor_empresa" REFTABLE="sepeservice_tutor_empresa" REFFIELDS="id"/>
+        <KEY NAME="fk_tutorform" TYPE="foreign" FIELDS="id_tutor_formacion" REFTABLE="sepeservice_tutor_formador" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_uso" COMMENT="Datos de uso y seguimiento">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_accion_formativa" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="num_participantes_m" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="num_accesos_m" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="duracion_total_m" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="num_participantes_t" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="num_accesos_t" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="duracion_total_t" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="num_participantes_n" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="num_accesos_n" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="duracion_total_n" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="num_participantes" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="numero_actividades_aprendizaje" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="numero_intentos" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="numero_actividades_evaluacion" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_accion" TYPE="foreign" FIELDS="id_accion_formativa" REFTABLE="sepeservice_accion_formativa" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_especialidad" COMMENT="Especialidades">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="origen_especialidad" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="area_profesional" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="codigo_especialidad" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_centro" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_inicio" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_fin" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="modalidad_imparticion" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="horas_presencial" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="horas_teleformacion" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="id_centro_presencial" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="id_tutor_formador" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="id_uso" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="id_accion_formativa" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_centro" TYPE="foreign" FIELDS="id_centro" REFTABLE="sepeservice_centro" REFFIELDS="id"/>
+        <KEY NAME="fk_centropres" TYPE="foreign" FIELDS="id_centro_presencial" REFTABLE="sepeservice_centro_presencial" REFFIELDS="id"/>
+        <KEY NAME="fk_tutor" TYPE="foreign" FIELDS="id_tutor_formador" REFTABLE="sepeservice_tutor_formador" REFFIELDS="id"/>
+        <KEY NAME="fk_uso" TYPE="foreign" FIELDS="id_uso" REFTABLE="sepeservice_uso" REFFIELDS="id"/>
+        <KEY NAME="fk_accion" TYPE="foreign" FIELDS="id_accion_formativa" REFTABLE="sepeservice_accion_formativa" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_accion_especialidad" COMMENT="Relacion Accion - Especialidad">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_accion_formativa" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_especialidad" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_accion" TYPE="foreign" FIELDS="id_accion_formativa" REFTABLE="sepeservice_accion_formativa" REFFIELDS="id"/>
+        <KEY NAME="fk_especialidad" TYPE="foreign" FIELDS="id_especialidad" REFTABLE="sepeservice_especialidad" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_especialidad_tutor" COMMENT="Relacion Especialidad - Tutor">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_especialidad" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_tutor_formador" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_especialidad" TYPE="foreign" FIELDS="id_especialidad" REFTABLE="sepeservice_especialidad" REFFIELDS="id"/>
+        <KEY NAME="fk_tutor" TYPE="foreign" FIELDS="id_tutor_formador" REFTABLE="sepeservice_tutor_formador" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_accion_especialidad_tutor" COMMENT="Relacion Accion - Esp - Tutor">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_accion_formativa" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_especialidad" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_tutor_formador" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_accion" TYPE="foreign" FIELDS="id_accion_formativa" REFTABLE="sepeservice_accion_formativa" REFFIELDS="id"/>
+        <KEY NAME="fk_especialidad" TYPE="foreign" FIELDS="id_especialidad" REFTABLE="sepeservice_especialidad" REFFIELDS="id"/>
+        <KEY NAME="fk_tutor" TYPE="foreign" FIELDS="id_tutor_formador" REFTABLE="sepeservice_tutor_formador" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_especialidad_centro" COMMENT="Relacion Especialidad - Centro Presencial">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_especialidad" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_centro_presencial" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_especialidad" TYPE="foreign" FIELDS="id_especialidad" REFTABLE="sepeservice_especialidad" REFFIELDS="id"/>
+        <KEY NAME="fk_centropres" TYPE="foreign" FIELDS="id_centro_presencial" REFTABLE="sepeservice_centro_presencial" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_especialidad_uso" COMMENT="Relacion Especialidad - Uso">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_especialidad" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_uso" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_especialidad" TYPE="foreign" FIELDS="id_especialidad" REFTABLE="sepeservice_especialidad" REFFIELDS="id"/>
+        <KEY NAME="fk_uso" TYPE="foreign" FIELDS="id_uso" REFTABLE="sepeservice_uso" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_participante" COMMENT="Participantes">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="tipo_documento" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="num_documento" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="letra_nif" TYPE="char" LENGTH="1" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="indicador_competencias_clave" TYPE="char" LENGTH="3" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="id_contrato_formacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="id_accion_formativa" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_contrato" TYPE="foreign" FIELDS="id_contrato_formacion" REFTABLE="sepeservice_contrato_formacion" REFFIELDS="id"/>
+        <KEY NAME="fk_accion" TYPE="foreign" FIELDS="id_accion_formativa" REFTABLE="sepeservice_accion_formativa" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_especialidad_participante" COMMENT="Relacion Participante - Especialidad">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_participante" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_especialidad" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_centro_presencial" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_alta" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_baja" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="resultado_final" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="calificacion_final" TYPE="number" LENGTH="5" DECIMALS="2" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="puntuacion_final" TYPE="number" LENGTH="5" DECIMALS="2" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_inicio" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_fin" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_participante" TYPE="foreign" FIELDS="id_participante" REFTABLE="sepeservice_participante" REFFIELDS="id"/>
+        <KEY NAME="fk_especialidad" TYPE="foreign" FIELDS="id_especialidad" REFTABLE="sepeservice_especialidad" REFFIELDS="id"/>
+        <KEY NAME="fk_centro" TYPE="foreign" FIELDS="id_centro_presencial" REFTABLE="sepeservice_centro_presencial" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_tutoria_presencial" COMMENT="Tutorias presenciales">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_especialidad_participante" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_centro_presencial" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_inicio" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_fin" TYPE="char" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_esppart" TYPE="foreign" FIELDS="id_especialidad_participante" REFTABLE="sepeservice_especialidad_participante" REFFIELDS="id"/>
+        <KEY NAME="fk_centro" TYPE="foreign" FIELDS="id_centro_presencial" REFTABLE="sepeservice_centro_presencial" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_evaluacion_final" COMMENT="Evaluacion final">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_especialidad_participante" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="id_centro_presencial" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_inicio" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_fin" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_esppart" TYPE="foreign" FIELDS="id_especialidad_participante" REFTABLE="sepeservice_especialidad_participante" REFFIELDS="id"/>
+        <KEY NAME="fk_centro" TYPE="foreign" FIELDS="id_centro_presencial" REFTABLE="sepeservice_centro_presencial" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+    <TABLE NAME="sepeservice_resultados" COMMENT="Resultados finales">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="id_especialidad_participante" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="resultado_final" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="calificacion_final" TYPE="number" LENGTH="5" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="puntuacion_final" TYPE="number" LENGTH="5" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_creacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="fecha_actualizacion" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_esppart" TYPE="foreign" FIELDS="id_especialidad_participante" REFTABLE="sepeservice_especialidad_participante" REFFIELDS="id"/>
+      </KEYS>
+    </TABLE>
+  </TABLES>
+</XMLDB>
