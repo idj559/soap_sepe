@@ -49,13 +49,17 @@ try {
     // 4. ENRUTAMIENTO
     switch ($action) {
         case 'crearCentro':
-            $data = $server->get_body_data_as_array();
+            $raw_data = $server->get_body_data_as_array();
+            
+            // CORRECCIÓN: El SEPE suele enviar los datos dentro de <DATOS_IDENTIFICATIVOS>
+            // Si existe esa clave, la usamos. Si no, usamos el array original.
+            $data = $raw_data['DATOS_IDENTIFICATIVOS'] ?? $raw_data;
+
             try {
                 $manager->crear_centro($data);
                 $datos = $manager->obtener_datos_centro();
             } catch (Exception $e) {
                 $retorno = 1; 
-                // Loguear error internamente, pero NO imprimirlo
                 error_log('SEPE crearCentro Error: ' . $e->getMessage());
                 $datos = [];
             }
@@ -75,16 +79,21 @@ try {
 
         case 'crearAccion':
             $data = $server->get_body_data_as_array();
-            // Normalizar: a veces llega directo, a veces envuelto
             $accion = $data['ACCION_FORMATIVA'] ?? $data;
             try {
                 $manager->crear_accion($accion);
+                
+                // Si llegamos aquí, fue éxito (se insertó)
+                $response_xml = $server->generate_response_accion('crearAccion', 0, $accion);
+                
             } catch (Exception $e) {
+                // Si salta error (DUPLICADO), devolvemos RETORNO 1 y VACÍO
                 $retorno = 1;
-                error_log('SEPE crearAccion Error: ' . $e->getMessage());
+                error_log('SEPE crearAccion Error (esperado si es duplicado): ' . $e->getMessage());
+                
+                // IMPORTANTE: Pasar array vacío para que salga nil
+                $response_xml = $server->generate_response_accion('crearAccion', 1, []);
             }
-            // Devolver los mismos datos como confirmación (requisito SEPE)
-            $response_xml = $server->generate_response_accion('crearAccion', $retorno, $accion);
             break;
 
         case 'obtenerAccion':

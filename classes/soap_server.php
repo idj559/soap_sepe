@@ -5,216 +5,234 @@ use DOMDocument;
 use DOMXPath;
 use DOMNode;
 use DOMElement;
+use Exception;
 
 defined('MOODLE_INTERNAL') || die();
 
+/**
+ * Servidor SOAP optimizado para generar XML limpio (estilo Axis2/SEPE).
+ */
 class soap_server {
 
     private $request_dom;
     private $xpath;
 
+    // Namespaces oficiales
+    const NS_SOAP = 'http://schemas.xmlsoap.org/soap/envelope/';
+    const NS_WSSE = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd';
+    const NS_IMPL = 'http://impl.ws.application.proveedorcentro.meyss.spee.es'; // p867
+    const NS_SALIDA = 'http://salida.bean.domain.common.proveedorcentro.meyss.spee.es'; // p148
+    const NS_ENTSAL = 'http://entsal.bean.domain.common.proveedorcentro.meyss.spee.es'; // p465
+    const NS_XSI = 'http://www.w3.org/2001/XMLSchema-instance';
+
     public function __construct($xml_content) {
         $this->request_dom = new DOMDocument();
-        // Opciones vitales para parsear XML sucio o con namespaces complejos
         $this->request_dom->preserveWhiteSpace = false;
         
+        $prev = libxml_use_internal_errors(true);
         if (!$this->request_dom->loadXML($xml_content)) {
-            throw new \Exception("XML mal formado o inválido.", 2); 
+            libxml_clear_errors();
+            libxml_use_internal_errors($prev);
+            throw new Exception("XML mal formado.", 400); 
         }
+        libxml_use_internal_errors($prev);
+
         $this->xpath = new DOMXPath($this->request_dom);
-        
-        // Registrar namespaces comunes del SEPE para facilitar queries específicas si hacen falta
-        $this->xpath->registerNamespace('soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-        $this->xpath->registerNamespace('wsse', 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd');
+        $this->xpath->registerNamespace('soapenv', self::NS_SOAP);
+        $this->xpath->registerNamespace('wsse', self::NS_WSSE);
+        $this->xpath->registerNamespace('p867', self::NS_IMPL);
     }
 
-    /**
-     * Valida las credenciales WS-Security contra un usuario de Moodle.
-     * (Igual que antes, pero asegúrate de tener esta lógica)
-     */
     public function validate_security() {
         global $DB;
-        $username_node = $this->xpath->query('//wsse:Username')->item(0);
-        $password_node = $this->xpath->query('//wsse:Password')->item(0);
+        $username_node = $this->xpath->query('//wsse:Security//wsse:Username')->item(0);
+        $password_node = $this->xpath->query('//wsse:Security//wsse:Password')->item(0);
 
-        if (!$username_node || !$password_node) {
-            throw new \Exception("Faltan credenciales de seguridad WS-Security", -2);
-        }
+        if (!$username_node || !$password_node) throw new Exception("Faltan credenciales WS-Security.", 401);
 
         $username = $username_node->nodeValue;
         $password = $password_node->nodeValue;
 
-        // Validar contra Moodle (Usuario específico para el servicio)
         $user = $DB->get_record('user', ['username' => $username, 'deleted' => 0, 'suspended' => 0]);
-
         if (!$user || !validate_internal_user_password($user, $password)) {
-             throw new \Exception("Credenciales inválidas o usuario no encontrado", -2);
+             throw new Exception("Credenciales incorrectas.", 401);
         }
-        
-        // Opcional: Verificar capability
-        // if (!user_has_capability('local/soap_sepe:manage', \context_system::instance(), $user)) { ... }
-        
-        return true;
     }
 
-    /**
-     * Obtiene el nombre de la operación (ej: crearAccion)
-     */
     public function get_action() {
-        $body_child = $this->xpath->query('//soapenv:Body/*')->item(0);
-        if (!$body_child) {
-            throw new \Exception("El cuerpo SOAP está vacío.", 2);
-        }
-        return $body_child->localName;
+        $nodes = $this->xpath->query('//soapenv:Body/*');
+        if ($nodes->length === 0) $nodes = $this->xpath->query('//*[local-name()="Body"]/*');
+        if ($nodes->length === 0) throw new Exception("Body vacío.");
+        return $nodes->item(0)->localName;
     }
 
-    /**
-     * Convierte el nodo principal de la petición (ej: ACCION_FORMATIVA) en un array PHP.
-     * Busca dentro del Body el primer hijo y lo procesa.
-     */
     public function get_body_data_as_array() {
-        $body_node = $this->xpath->query('//soapenv:Body/*')->item(0);
-        if (!$body_node) return [];
-
-        // Convertimos recursivamente
-        // A menudo la petición viene envuelta en un nodo "Wrapper" (ej: crearAccion), 
-        // y los datos reales están dentro (ej: ACCION_FORMATIVA).
-        // Dependiendo del WSDL, a veces queremos el wrapper o lo de dentro.
-        // Para crearAccion, el PDF dice que llega un nodo <ACCION_FORMATIVA>.
-        
-        // Buscamos directamente el nodo de datos útil si existe, o parseamos todo el wrapper.
-        // Estrategia: Parsear todo el wrapper del Body.
-        return $this->xml_to_array($body_node);
+        $nodes = $this->xpath->query('//soapenv:Body/*');
+        if ($nodes->length === 0) $nodes = $this->xpath->query('//*[local-name()="Body"]/*');
+        return ($nodes->length > 0) ? $this->xml_to_array($nodes->item(0)) : [];
     }
 
-    /**
-     * Función auxiliar recursiva para convertir DOM a Array
-     */
+    // --- GENERADORES DE RESPUESTA ---
+
+    public function generate_response_datos_centro($action_name, $codigo_retorno, $data = []) {
+        $dom = new DOMDocument('1.0', 'UTF-8');
+        $wrapper = $this->_create_base_structure($dom, $action_name . 'Response');
+
+        $resp_datos = $dom->createElementNS(self::NS_SALIDA, 'p148:RESPUESTA_DATOS_CENTRO');
+        $resp_datos->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:p465', self::NS_ENTSAL);
+        
+        $this->_append_status_block($dom, $resp_datos, $codigo_retorno);
+
+        if ($codigo_retorno == 0 && !empty($data)) {
+            $nodo_datos = $dom->createElementNS(self::NS_ENTSAL, 'p465:DATOS_IDENTIFICATIVOS');
+            $this->array_to_xml($data, $nodo_datos, $dom);
+            $resp_datos->appendChild($nodo_datos);
+        }
+
+        $wrapper->appendChild($resp_datos);
+        return $dom->saveXML();
+    }
+
+    public function generate_response_accion($action_name, $codigo_retorno, $data = []) {
+        $dom = new DOMDocument('1.0', 'UTF-8');
+        $wrapper = $this->_create_base_structure($dom, $action_name . 'Response');
+
+        $resp_obt = $dom->createElementNS(self::NS_SALIDA, 'p148:RESPUESTA_OBT_ACCION');
+        $resp_obt->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:p465', self::NS_ENTSAL);
+
+        $this->_append_status_block($dom, $resp_obt, $codigo_retorno);
+
+        $nodo_acc = $dom->createElementNS(self::NS_ENTSAL, 'p465:ACCION_FORMATIVA');
+        if ($codigo_retorno == 0 && !empty($data)) {
+            $this->array_to_xml($data, $nodo_acc, $dom);
+        } else {
+            // CORRECCIÓN: Usar setAttribute (sin NS) para evitar la repetición de xmlns:xsi
+            $nodo_acc->setAttribute('xsi:nil', 'true');
+        }
+        $resp_obt->appendChild($nodo_acc);
+
+        $wrapper->appendChild($resp_obt);
+        return $dom->saveXML();
+    }
+
+    public function generate_response_eliminar($codigo_retorno) {
+        $dom = new DOMDocument('1.0', 'UTF-8');
+        $wrapper = $this->_create_base_structure($dom, 'eliminarAccionResponse');
+
+        $resp_el = $dom->createElementNS(self::NS_SALIDA, 'p148:RESPUESTA_ELIMINAR_ACCION');
+        $this->_append_status_block($dom, $resp_el, $codigo_retorno);
+        $wrapper->appendChild($resp_el);
+        return $dom->saveXML();
+    }
+
+    public function generate_response_lista($codigo_retorno, $lista = []) {
+        $dom = new DOMDocument('1.0', 'UTF-8');
+        $wrapper = $this->_create_base_structure($dom, 'obtenerListaAccionesResponse');
+
+        $resp_lista = $dom->createElementNS(self::NS_SALIDA, 'p148:RESPUESTA_OBT_LISTA_ACCIONES');
+        $resp_lista->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:p465', self::NS_ENTSAL);
+
+        $this->_append_status_block($dom, $resp_lista, $codigo_retorno);
+
+        if ($codigo_retorno == 0 && !empty($lista)) {
+            foreach ($lista as $item) {
+                $nodo = $dom->createElementNS(self::NS_ENTSAL, 'p465:ID_ACCION');
+                $this->array_to_xml($item, $nodo, $dom);
+                $resp_lista->appendChild($nodo);
+            }
+        } else {
+            // CORRECCIÓN: Usar setAttribute (sin NS) para lista vacía limpia
+            $nodo = $dom->createElementNS(self::NS_ENTSAL, 'p465:ID_ACCION');
+            $nodo->setAttribute('xsi:nil', 'true'); 
+            $resp_lista->appendChild($nodo);
+        }
+        
+        $wrapper->appendChild($resp_lista);
+        return $dom->saveXML();
+    }
+    
+    public function generate_fault($message, $code = 'Server') {
+        return '<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><soapenv:Fault><faultcode>'.$code.'</faultcode><faultstring>'.htmlspecialchars($message).'</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>';
+    }
+
+    // --- HELPERS PRIVADOS ---
+
+    private function _create_base_structure($dom, $node_name) {
+        $envelope = $dom->createElementNS(self::NS_SOAP, 'soapenv:Envelope');
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:soapenv', self::NS_SOAP);
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:soapenc', 'http://schemas.xmlsoap.org/soap/encoding/');
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsd', 'http://www.w3.org/2001/XMLSchema');
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsi', self::NS_XSI);
+        
+        // Declaramos namespaces globales adicionales en el Envelope para limpiar el body
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:p867', self::NS_IMPL);
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:p148', self::NS_SALIDA);
+        $envelope->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:p465', self::NS_ENTSAL);
+        
+        $dom->appendChild($envelope);
+        $body = $dom->createElementNS(self::NS_SOAP, 'soapenv:Body');
+        $envelope->appendChild($body);
+        
+        $main = $dom->createElementNS(self::NS_IMPL, 'p867:' . $node_name);
+        $body->appendChild($main);
+        return $main;
+    }
+
+    private function _append_status_block($dom, $parent, $code) {
+        $parent->appendChild($dom->createElement('CODIGO_RETORNO', $code));
+        $err = $dom->createElement('ETIQUETA_ERROR');
+        
+        // CORRECCIÓN: Usar setAttribute (sin NS) para evitar redundancia
+        // Como 'xmlns:xsi' ya está en el Envelope, esto generará 'xsi:nil="true"' limpio.
+        $err->setAttribute('xsi:nil', 'true');
+        
+        $parent->appendChild($err);
+    }
+
     private function xml_to_array(DOMNode $node) {
         $result = [];
-
-        if ($node->nodeType === XML_TEXT_NODE) {
-            return $node->nodeValue;
-        }
-
+        if ($node->nodeType === XML_TEXT_NODE) return $node->nodeValue;
         if ($node->hasChildNodes()) {
             foreach ($node->childNodes as $child) {
-                // Ignorar nodos de texto vacíos (formato)
-                if ($child->nodeType === XML_TEXT_NODE && trim($child->nodeValue) === '') {
-                    continue;
-                }
-
-                // Obtener nombre sin namespace (localName)
                 $name = $child->localName;
-
-                // Llamada recursiva
-                $childData = ($child->nodeType === XML_TEXT_NODE) 
-                             ? $child->nodeValue 
-                             : $this->xml_to_array($child);
-
-                // Manejo de listas (elementos repetidos con el mismo nombre)
+                if (!$name) continue;
+                $childData = $this->xml_to_array($child);
+                if (is_array($childData) && empty($childData) && trim($child->nodeValue) !== '') {
+                     $childData = trim($child->nodeValue);
+                }
                 if (isset($result[$name])) {
-                    if (!is_array($result[$name]) || !isset($result[$name][0])) {
-                        // Si ya existe pero no es una lista numérica, lo convertimos en una
-                        $result[$name] = [$result[$name]];
-                    }
+                    if (!is_array($result[$name]) || !isset($result[$name][0])) $result[$name] = [$result[$name]];
                     $result[$name][] = $childData;
                 } else {
                     $result[$name] = $childData;
                 }
             }
         }
-        
-        // Si el nodo no tenía hijos útiles (solo texto directo), devolver el texto
-        if (empty($result) && !empty($node->nodeValue)) {
-            return $node->nodeValue;
-        }
-
+        if (empty($result) && $node->nodeValue !== '') return $node->nodeValue;
         return $result;
     }
 
-    /**
-     * Genera la respuesta XML SOAP Genérica.
-     * @param string $action_response_node Nombre del nodo respuesta (ej: crearAccionResponse)
-     * @param int $codigo_retorno
-     * @param string|null $extra_xml XML string crudo para inyectar dentro (ej: <ID_ACCION>...</ID_ACCION>)
-     */
-    public function generate_response($action_response_node, $codigo_retorno, $extra_xml = null) {
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $dom->formatOutput = true;
-
-        $envelope = $dom->createElement('soapenv:Envelope');
-        $envelope->setAttribute('xmlns:soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-        $dom->appendChild($envelope);
-        
-        $body = $dom->createElement('soapenv:Body');
-        $envelope->appendChild($body);
-        
-        // Nodo respuesta específico de la operación
-        $response_node = $dom->createElement('p867:' . $action_response_node);
-        $response_node->setAttribute('xmlns:p867', 'http://impl.ws.application.proveedorcentro.meyss.spee.es');
-        $body->appendChild($response_node);
-        
-        // Contenedor interno estándar (según tus ejemplos anteriores)
-        // Nota: El nombre de este nodo varía según la operación.
-        // Para crearAccion es p148:RESPUESTA_OBT_ACCION
-        // Para crearCentro es p148:RESPUESTA_DATOS_CENTRO
-        // Tendrás que pasar este nombre como parámetro o deducirlo.
-        // Por simplicidad, asumiremos que lo pasas en $extra_xml o lo parametrizamos luego.
-        
-        // Para este ejemplo, inyectamos el XML extra directamente si viene construido,
-        // o construimos lo básico.
-        
-        // ... (Aquí puedes reutilizar tu lógica anterior de generación de XML, 
-        // pero adaptada para recibir parámetros en lugar de hardcodear) ...
-        
-        return $dom->saveXML();
-    }
-    
-    // Método específico para crearAccionResponse (para simplificar index.php)
-    public function generate_response_crear_accion($codigo_retorno, $data_accion = []) {
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        
-        $envelope = $dom->createElement('soapenv:Envelope');
-        $envelope->setAttribute('xmlns:soapenv', 'http://schemas.xmlsoap.org/soap/envelope/');
-        $dom->appendChild($envelope);
-        
-        $body = $dom->createElement('soapenv:Body');
-        $envelope->appendChild($body);
-        
-        $main = $dom->createElement('p867:crearAccionResponse');
-        $main->setAttribute('xmlns:p867', 'http://impl.ws.application.proveedorcentro.meyss.spee.es');
-        $body->appendChild($main);
-        
-        $resp = $dom->createElement('p148:RESPUESTA_OBT_ACCION');
-        $resp->setAttribute('xmlns:p148', 'http://salida.bean.domain.common.proveedorcentro.meyss.spee.es');
-        $resp->setAttribute('xmlns:p465', 'http://entsal.bean.domain.common.proveedorcentro.meyss.spee.es');
-        $main->appendChild($resp);
-        
-        $resp->appendChild($dom->createElement('CODIGO_RETORNO', $codigo_retorno));
-        
-        $err = $dom->createElement('ETIQUETA_ERROR');
-        $err->setAttribute('xsi:nil', 'true');
-        $resp->appendChild($err);
-        
-        $acc = $dom->createElement('p465:ACCION_FORMATIVA');
-        if ($codigo_retorno == 0 && !empty($data_accion)) {
-            // Devolver datos mínimos de confirmación (ID y Código)
-            // Según tu lógica anterior, devolvías casi todo. 
-            // Aquí reconstruimos lo básico para confirmar.
-            
-            $id_acc = $dom->createElement('ID_ACCION');
-            // Ojo: $data_accion es el array limpio, usamos las keys limpias
-            $id_acc->appendChild($dom->createElement('ORIGEN_ACCION', $data_accion['ID_ACCION']['ORIGEN_ACCION'] ?? ''));
-            $id_acc->appendChild($dom->createElement('CODIGO_ACCION', $data_accion['ID_ACCION']['CODIGO_ACCION'] ?? ''));
-            $acc->appendChild($id_acc);
-            
-            // ... Puedes añadir más campos si el SEPE lo exige en el retorno ...
-        } else {
-            $acc->setAttribute('xsi:nil', 'true');
+    private function array_to_xml($data, DOMElement $parent, DOMDocument $dom) {
+        if (!is_array($data)) {
+            $parent->nodeValue = htmlspecialchars((string)$data);
+            return;
         }
-        $resp->appendChild($acc);
-        
-        return $dom->saveXML();
+        foreach ($data as $key => $val) {
+            if (is_numeric($key)) continue;
+            
+            if (is_array($val) && isset($val[0])) {
+                foreach ($val as $item) {
+                    $sub = $dom->createElement($key);
+                    $this->array_to_xml($item, $sub, $dom);
+                    $parent->appendChild($sub);
+                }
+            } else {
+                if ($val === null) continue; 
+                
+                $sub = $dom->createElement($key);
+                $this->array_to_xml($val, $sub, $dom);
+                $parent->appendChild($sub);
+            }
+        }
     }
 }

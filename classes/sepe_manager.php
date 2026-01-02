@@ -1,370 +1,462 @@
 <?php
 namespace local_soap_sepe;
 
-use DOMDocument;
-use DOMXPath;
-use DOMNode;
-use DOMElement;
-use Exception;
-
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Servidor SOAP especializado para el contrato WSDL del SEPE.
- * Maneja el parsing de XML crudo, seguridad WS-Security y generación de respuestas estrictas.
+ * Clase encargada de la lógica de negocio y persistencia en BD.
+ * Incluye procesamiento recursivo completo de Tutores, Centros Presenciales y Uso.
  */
-class soap_server {
+class sepe_manager {
 
-    private $request_dom;
-    private $xpath;
+    // =========================================================================
+    // GESTIÓN DE CENTRO
+    // =========================================================================
 
-    // Espacios de nombres definidos en el WSDL del SEPE
-    const NS_SOAP = 'http://schemas.xmlsoap.org/soap/envelope/';
-    const NS_WSSE = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd';
-    const NS_IMPL = 'http://impl.ws.application.proveedorcentro.meyss.spee.es'; // p867
-    const NS_SALIDA = 'http://salida.bean.domain.common.proveedorcentro.meyss.spee.es'; // p148
-    const NS_ENTSAL = 'http://entsal.bean.domain.common.proveedorcentro.meyss.spee.es'; // p465
-
-    public function __construct($xml_content) {
-        $this->request_dom = new DOMDocument();
-        $this->request_dom->preserveWhiteSpace = false;
-        
-        // Silenciar errores de libxml estándar y manejarlos como excepciones
-        $prev = libxml_use_internal_errors(true);
-        if (!$this->request_dom->loadXML($xml_content)) {
-            $errors = libxml_get_errors();
-            libxml_clear_errors();
-            libxml_use_internal_errors($prev);
-            throw new Exception("XML de petición mal formado o inválido.", 400); 
-        }
-        libxml_use_internal_errors($prev);
-
-        $this->xpath = new DOMXPath($this->request_dom);
-        $this->_register_namespaces();
-    }
-
-    private function _register_namespaces() {
-        $this->xpath->registerNamespace('soapenv', self::NS_SOAP);
-        $this->xpath->registerNamespace('wsse', self::NS_WSSE);
-        $this->xpath->registerNamespace('p867', self::NS_IMPL);
-        // Registramos otros por si fueran necesarios para consultas específicas
-        $this->xpath->registerNamespace('p148', self::NS_SALIDA);
-        $this->xpath->registerNamespace('p465', self::NS_ENTSAL);
-    }
-
-    /**
-     * Valida las credenciales WS-Security (UsernameToken) contra la BD de Moodle.
-     */
-    public function validate_security() {
+    public function crear_centro($data) {
         global $DB;
+        $record = new \stdClass();
 
-        $username_node = $this->xpath->query('//wsse:Security//wsse:Username')->item(0);
-        $password_node = $this->xpath->query('//wsse:Security//wsse:Password')->item(0);
+        // Extraer datos de la sub-estructura ID_CENTRO si existe
+        $id_centro_data = $data['ID_CENTRO'] ?? [];
 
-        if (!$username_node || !$password_node) {
-            throw new Exception("Faltan credenciales de seguridad (WS-Security Username/Password).", 401);
+        $record->origen_centro   = $id_centro_data['ORIGEN_CENTRO'] ?? $data['ORIGEN_CENTRO'] ?? '';
+        $record->codigo_centro   = $id_centro_data['CODIGO_CENTRO'] ?? $data['CODIGO_CENTRO'] ?? '';
+        $record->nombre_centro   = $data['NOMBRE_CENTRO'] ?? '';
+        $record->url_plataforma  = $data['URL_PLATAFORMA'] ?? '';
+        $record->url_seguimiento = $data['URL_SEGUIMIENTO'] ?? '';
+        $record->telefono        = $data['TELEFONO'] ?? '';
+        $record->email           = $data['EMAIL'] ?? '';
+        $record->fecha_creacion  = time();
+
+        if (empty($record->codigo_centro)) {
+            error_log('SEPE crear_centro: CODIGO_CENTRO vacío.');
+            throw new \Exception("Faltan datos obligatorios del centro (CODIGO_CENTRO).");
         }
 
-        $username = $username_node->nodeValue;
-        $password = $password_node->nodeValue;
+        $existing = $DB->get_record('sepeservice_centro', ['codigo_centro' => $record->codigo_centro]);
 
-        // Validamos contra la tabla de usuarios de Moodle
-        // IMPORTANTE: Se recomienda tener un usuario específico en Moodle para este servicio (ej: 'sepe_api')
-        $user = $DB->get_record('user', ['username' => $username, 'deleted' => 0, 'suspended' => 0]);
-
-        if (!$user) {
-            throw new Exception("Usuario de servicio no encontrado.", 401);
-        }
-
-        if (!validate_internal_user_password($user, $password)) {
-             throw new Exception("Contraseña de servicio incorrecta.", 401);
-        }
-        
-        // Verificación extra de permisos si fuera necesario
-        // if (!user_has_capability('local/soap_sepe:manage', \context_system::instance(), $user)) { ... }
-        
-        return true;
-    }
-
-    /**
-     * Obtiene el nombre de la operación solicitada (el hijo directo del Body).
-     * Ej: crearAccion, obtenerDatosCentro, etc.
-     */
-    public function get_action() {
-        $body_child = $this->xpath->query('//soapenv:Body/*')->item(0);
-        if (!$body_child) {
-            throw new Exception("El cuerpo SOAP (Body) está vacío.", 400);
-        }
-        // Usamos localName para ignorar el prefijo (p867:crearAccion -> crearAccion)
-        return $body_child->localName;
-    }
-
-    /**
-     * Extrae todos los datos del Body y los convierte en un array asociativo.
-     * Elimina los namespaces de las claves para facilitar el uso en PHP.
-     */
-    public function get_body_data_as_array() {
-        $body_node = $this->xpath->query('//soapenv:Body/*')->item(0);
-        if (!$body_node) return [];
-
-        return $this->xml_to_array($body_node);
-    }
-
-    // =========================================================================
-    // GENERADORES DE RESPUESTA (ESPECÍFICOS POR OPERACIÓN)
-    // =========================================================================
-
-    /**
-     * Respuesta para: crearCentro y obtenerDatosCentro
-     */
-    public function generate_response_datos_centro($action_name, $codigo_retorno, $data = []) {
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        // Envelope y Body con el wrapper de respuesta (ej: crearCentroResponse)
-        $resp_wrapper = $this->_create_base_structure($dom, $action_name . 'Response');
-
-        // Nodo contenedor de datos: p148:RESPUESTA_DATOS_CENTRO
-        $resp_datos = $dom->createElement('p148:RESPUESTA_DATOS_CENTRO');
-        $resp_datos->setAttribute('xmlns:p148', self::NS_SALIDA);
-        $resp_datos->setAttribute('xmlns:p465', self::NS_ENTSAL);
-        
-        // Bloque estándar de estado
-        $this->_append_status_block($dom, $resp_datos, $codigo_retorno);
-
-        // Si hay éxito y datos, los inyectamos (DATOS_IDENTIFICATIVOS)
-        if ($codigo_retorno == 0 && !empty($data)) {
-            $nodo_datos = $dom->createElement('p465:DATOS_IDENTIFICATIVOS');
-            $this->array_to_xml($data, $nodo_datos, $dom);
-            $resp_datos->appendChild($nodo_datos);
-        }
-
-        $resp_wrapper->appendChild($resp_datos);
-        return $dom->saveXML();
-    }
-
-    /**
-     * Respuesta para: crearAccion y obtenerAccion
-     */
-    public function generate_response_accion($action_name, $codigo_retorno, $data = []) {
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $resp_wrapper = $this->_create_base_structure($dom, $action_name . 'Response');
-
-        // Nodo contenedor: p148:RESPUESTA_OBT_ACCION
-        $resp_obt = $dom->createElement('p148:RESPUESTA_OBT_ACCION');
-        $resp_obt->setAttribute('xmlns:p148', self::NS_SALIDA);
-        $resp_obt->setAttribute('xmlns:p465', self::NS_ENTSAL);
-
-        $this->_append_status_block($dom, $resp_obt, $codigo_retorno);
-
-        // Nodo de datos: p465:ACCION_FORMATIVA
-        $nodo_acc = $dom->createElement('p465:ACCION_FORMATIVA');
-        if ($codigo_retorno == 0 && !empty($data)) {
-            $this->array_to_xml($data, $nodo_acc, $dom);
+        if ($existing) {
+            $record->id = $existing->id;
+            $DB->update_record('sepeservice_centro', $record);
+            return $existing->id;
         } else {
-            // Si hay error o está vacío, suele enviarse nil
-            $nodo_acc->setAttribute('xsi:nil', 'true');
-            $nodo_acc->setAttribute('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance');
+            return $DB->insert_record('sepeservice_centro', $record);
         }
-        $resp_obt->appendChild($nodo_acc);
-
-        $resp_wrapper->appendChild($resp_obt);
-        return $dom->saveXML();
     }
 
-    /**
-     * Respuesta para: eliminarAccion
-     */
-    public function generate_response_eliminar($codigo_retorno) {
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $resp_wrapper = $this->_create_base_structure($dom, 'eliminarAccionResponse');
+    public function obtener_datos_centro() {
+        global $DB;
+        $record = $DB->get_record('sepeservice_centro', [], '*', IGNORE_MULTIPLE);
+        if (!$record) return null;
 
-        $resp_el = $dom->createElement('p148:RESPUESTA_ELIMINAR_ACCION');
-        $resp_el->setAttribute('xmlns:p148', self::NS_SALIDA);
-
-        $this->_append_status_block($dom, $resp_el, $codigo_retorno);
-
-        $resp_wrapper->appendChild($resp_el);
-        return $dom->saveXML();
+        return [
+            'ID_CENTRO' => [
+                'ORIGEN_CENTRO' => $record->origen_centro,
+                'CODIGO_CENTRO' => $record->codigo_centro
+            ],
+            'NOMBRE_CENTRO'   => $record->nombre_centro,
+            'URL_PLATAFORMA'  => $record->url_plataforma,
+            'URL_SEGUIMIENTO' => $record->url_seguimiento,
+            'TELEFONO'        => $record->telefono,
+            'EMAIL'           => $record->email
+        ];
     }
 
-    /**
-     * Respuesta para: obtenerListaAcciones
-     */
-    public function generate_response_lista($codigo_retorno, $lista = []) {
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $resp_wrapper = $this->_create_base_structure($dom, 'obtenerListaAccionesResponse');
+    // =========================================================================
+    // GESTIÓN DE ACCIONES (CREACIÓN)
+    // =========================================================================
 
-        $resp_lista = $dom->createElement('p148:RESPUESTA_OBT_LISTA_ACCIONES');
-        $resp_lista->setAttribute('xmlns:p148', self::NS_SALIDA);
-        $resp_lista->setAttribute('xmlns:p465', self::NS_ENTSAL);
+    public function crear_accion($data) {
+        global $DB;
+        $transaction = $DB->start_delegated_transaction();
 
-        $this->_append_status_block($dom, $resp_lista, $codigo_retorno);
+        try {
+            $centro = $DB->get_record('sepeservice_centro', [], 'id', IGNORE_MULTIPLE);
+            if (!$centro) throw new \Exception('No hay centro configurado en la BD local.');
+            $id_centro_local = $centro->id;
 
-        // La lista devuelve nodos p465:ID_ACCION repetidos
-        if ($codigo_retorno == 0 && !empty($lista)) {
-            foreach ($lista as $item) {
-                $nodo = $dom->createElement('p465:ID_ACCION');
-                // ID_ACCION tiene dentro ORIGEN_ACCION y CODIGO_ACCION sin prefijo
-                $this->array_to_xml($item, $nodo, $dom);
-                $resp_lista->appendChild($nodo);
+            $accion = new \stdClass();
+            $id_data = $data['ID_ACCION'] ?? [];
+            $accion->origen_accion           = $id_data['ORIGEN_ACCION'] ?? '';
+            $accion->codigo_accion           = $id_data['CODIGO_ACCION'] ?? '';
+            $accion->situacion               = $data['SITUACION'] ?? '';
+            
+            $esp_princ = $data['ID_ESPECIALIDAD_PRINCIPAL'] ?? [];
+            $accion->origen_especialidad     = $esp_princ['ORIGEN_ESPECIALIDAD'] ?? '';
+            $accion->area_profesional        = $esp_princ['AREA_PROFESIONAL'] ?? '';
+            $accion->codigo_especialidad     = $esp_princ['CODIGO_ESPECIALIDAD'] ?? '';
+            
+            $accion->duracion                = (int)($data['DURACION'] ?? 0);
+            $accion->fecha_inicio            = $data['FECHA_INICIO'] ?? '';
+            $accion->fecha_fin               = $data['FECHA_FIN'] ?? '';
+            $accion->ind_itinerario_completo = $data['IND_ITINERARIO_COMPLETO'] ?? 'NO';
+            $accion->tipo_financiacion       = $data['TIPO_FINANCIACION'] ?? '';
+            $accion->numero_asistentes       = (int)($data['NUMERO_ASISTENTES'] ?? 0);
+            
+            $desc = $data['DESCRIPCION_ACCION'] ?? [];
+            $accion->denominacion_accion     = $desc['DENOMINACION_ACCION'] ?? '';
+            $accion->informacion_general     = $desc['INFORMACION_GENERAL'] ?? '';
+            $accion->horarios                = $desc['HORARIOS'] ?? '';
+            $accion->requisitos              = $desc['REQUISITOS'] ?? '';
+            $accion->contacto_accion         = $desc['CONTACTO_ACCION'] ?? '';
+            
+            $accion->id_centro               = $id_centro_local;
+            $accion->fecha_actualizacion     = time();
+
+            if (empty($accion->codigo_accion)) throw new \Exception("Falta CODIGO_ACCION.");
+
+            // --- CAMBIO CLAVE AQUÍ ---
+            $existing_accion = $DB->get_record('sepeservice_accion_formativa', ['codigo_accion' => $accion->codigo_accion]);
+            
+            if ($existing_accion) {
+                // Para pasar el test "ya creada", DEBE fallar si existe.
+                throw new \Exception("La acción formativa ya existe: " . $accion->codigo_accion);
+            } else {
+                $accion->fecha_creacion = time();
+                $id_accion = $DB->insert_record('sepeservice_accion_formativa', $accion);
             }
+            // --------------------------
+
+            if (!empty($data['ESPECIALIDADES_ACCION']['ESPECIALIDAD'])) {
+                $especialidades = $this->_normalize_array($data['ESPECIALIDADES_ACCION']['ESPECIALIDAD']);
+                $this->_procesar_especialidades($id_accion, $id_centro_local, $especialidades);
+            }
+
+            if (!empty($data['PARTICIPANTES']['PARTICIPANTE'])) {
+                $participantes = $this->_normalize_array($data['PARTICIPANTES']['PARTICIPANTE']);
+                $this->_procesar_participantes($id_accion, $participantes);
+            }
+
+            $transaction->allow_commit();
+            return true;
+
+        } catch (\Exception $e) {
+            $transaction->rollback($e);
+            throw $e;
         }
-
-        $resp_wrapper->appendChild($resp_lista);
-        return $dom->saveXML();
-    }
-
-    /**
-     * Genera un Fault SOAP genérico en caso de error grave.
-     */
-    public function generate_fault($message, $code = 'Server') {
-        // XML manual string para asegurar que sale pase lo que pase con el DOM
-        return '<?xml version="1.0" encoding="UTF-8"?>
-        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
-           <soapenv:Body>
-              <soapenv:Fault>
-                 <faultcode>' . $code . '</faultcode>
-                 <faultstring>' . htmlspecialchars($message) . '</faultstring>
-              </soapenv:Fault>
-           </soapenv:Body>
-        </soapenv:Envelope>';
     }
 
     // =========================================================================
-    // UTILIDADES PRIVADAS
+    // GESTIÓN DE ACCIONES (RECUPERACIÓN - ORDEN ESTRICTO)
     // =========================================================================
 
-    /**
-     * Crea la estructura base del Envelope y el Body, y devuelve el nodo Response wrapper.
-     */
-    private function _create_base_structure(DOMDocument $dom, $response_node_name) {
-        $envelope = $dom->createElement('soapenv:Envelope');
-        $envelope->setAttribute('xmlns:soapenv', self::NS_SOAP);
-        $dom->appendChild($envelope);
+    public function obtener_accion($id_accion_data) {
+        global $DB;
+        $codigo = $id_accion_data['CODIGO_ACCION'] ?? '';
         
-        $body = $dom->createElement('soapenv:Body');
-        $envelope->appendChild($body);
-        
-        // El wrapper de la respuesta (ej: p867:crearAccionResponse)
-        $wrapper = $dom->createElement('p867:' . $response_node_name);
-        $wrapper->setAttribute('xmlns:p867', self::NS_IMPL);
-        $body->appendChild($wrapper);
-        
-        return $wrapper;
-    }
+        $acc = $DB->get_record('sepeservice_accion_formativa', ['codigo_accion' => $codigo]);
+        if (!$acc) return null;
 
-    /**
-     * Añade los campos CODIGO_RETORNO y ETIQUETA_ERROR.
-     */
-    private function _append_status_block(DOMDocument $dom, DOMElement $parent, $code) {
-        $parent->appendChild($dom->createElement('CODIGO_RETORNO', $code));
-        
-        $error = $dom->createElement('ETIQUETA_ERROR');
-        if ($code != 0) {
-            // Si hay error, aquí podríamos poner texto. Por ahora dejamos nil o vacío según spec.
-            // Para debug, podrías poner texto si $code < 0
-        }
-        $error->setAttribute('xsi:nil', 'true');
-        $error->setAttribute('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance');
-        $parent->appendChild($error);
-    }
-
-    /**
-     * Convierte recursivamente un DOMNode a un Array PHP.
-     * Ignora namespaces en las claves.
-     */
-    private function xml_to_array(DOMNode $node) {
         $result = [];
+        
+        // 1-10 Campos principales
+        $result['ID_ACCION'] = ['ORIGEN_ACCION' => $acc->origen_accion, 'CODIGO_ACCION' => $acc->codigo_accion];
+        $result['SITUACION'] = $acc->situacion;
+        $result['ID_ESPECIALIDAD_PRINCIPAL'] = ['ORIGEN_ESPECIALIDAD' => $acc->origen_especialidad, 'AREA_PROFESIONAL' => $acc->area_profesional, 'CODIGO_ESPECIALIDAD' => $acc->codigo_especialidad];
+        $result['DURACION'] = $acc->duracion;
+        $result['FECHA_INICIO'] = $acc->fecha_inicio;
+        $result['FECHA_FIN'] = $acc->fecha_fin;
+        $result['IND_ITINERARIO_COMPLETO'] = $acc->ind_itinerario_completo;
+        $result['TIPO_FINANCIACION'] = $acc->tipo_financiacion;
+        $result['NUMERO_ASISTENTES'] = $acc->numero_asistentes;
+        $result['DESCRIPCION_ACCION'] = [
+            'DENOMINACION_ACCION' => $acc->denominacion_accion,
+            'INFORMACION_GENERAL' => $acc->informacion_general,
+            'HORARIOS' => $acc->horarios,
+            'REQUISITOS' => $acc->requisitos,
+            'CONTACTO_ACCION' => $acc->contacto_accion
+        ];
 
-        if ($node->nodeType === XML_TEXT_NODE) {
-            return $node->nodeValue;
-        }
-
-        if ($node->hasChildNodes()) {
-            foreach ($node->childNodes as $child) {
-                if ($child->nodeType === XML_TEXT_NODE) {
-                    $val = trim($child->nodeValue);
-                    if ($val === '') continue;
-                    // Si el nodo solo tiene texto, devolverlo directamente
-                    // Pero si tiene hermanos elementos, cuidado.
-                    // Simplificación: si es nodo texto puro sin hermanos elementos, es valor.
-                }
-
-                // Usamos localName para quitar 'p465:', etc.
-                $name = $child->localName;
-                if (!$name) continue; // Skip text nodes here usually
-
-                $childData = $this->xml_to_array($child);
+        // 11. ESPECIALIDADES_ACCION
+        $links = $DB->get_records('sepeservice_accion_especialidad', ['id_accion_formativa' => $acc->id]);
+        $esp_xml = [];
+        
+        foreach ($links as $l) {
+            $esp = $DB->get_record('sepeservice_especialidad', ['id' => $l->id_especialidad]);
+            if ($esp) {
+                $datos_centro_local = $this->obtener_datos_centro();
                 
-                // Si el parser devolvió un array vacío y el nodo tiene valor (texto), intentamos coger el valor
-                if (is_array($childData) && empty($childData) && $child->nodeValue !== '') {
-                     $cleanVal = trim($child->nodeValue);
-                     if ($cleanVal !== '') $childData = $cleanVal;
+                $esp_node = [];
+                $esp_node['ID_ESPECIALIDAD'] = ['ORIGEN_ESPECIALIDAD' => $esp->origen_especialidad, 'AREA_PROFESIONAL' => $esp->area_profesional, 'CODIGO_ESPECIALIDAD' => $esp->codigo_especialidad];
+                $esp_node['CENTRO_IMPARTICION'] = $datos_centro_local['ID_CENTRO'] ?? []; 
+                $esp_node['FECHA_INICIO'] = $esp->fecha_inicio;
+                $esp_node['FECHA_FIN'] = $esp->fecha_fin;
+                $esp_node['MODALIDAD_IMPARTICION'] = $esp->modalidad_imparticion;
+                $esp_node['DATOS_DURACION'] = ['HORAS_PRESENCIAL' => $esp->horas_presencial, 'HORAS_TELEFORMACION' => $esp->horas_teleformacion];
+                
+                // Centros Presenciales
+                $cp_links = $DB->get_records('sepeservice_especialidad_centro', ['id_especialidad' => $esp->id]);
+                if ($cp_links) {
+                    $cps_xml = [];
+                    foreach ($cp_links as $cpl) {
+                        $cp = $DB->get_record('sepeservice_centro_presencial', ['id' => $cpl->id_centro_presencial]);
+                        if ($cp) {
+                            $cps_xml[] = ['ORIGEN_CENTRO' => $cp->origen_centro, 'CODIGO_CENTRO' => $cp->codigo_centro];
+                        }
+                    }
+                    if (!empty($cps_xml)) $esp_node['CENTROS_SESIONES_PRESENCIALES']['CENTRO_PRESENCIAL'] = $cps_xml;
                 }
 
-                // Manejo de listas (mismo tag repetido)
-                if (isset($result[$name])) {
-                    if (!is_array($result[$name]) || !isset($result[$name][0])) {
-                        $result[$name] = [$result[$name]];
+                // Tutores
+                $t_links = $DB->get_records('sepeservice_accion_especialidad_tutor', ['id_accion_formativa'=>$acc->id, 'id_especialidad'=>$esp->id]);
+                if ($t_links) {
+                    $tuts_xml = [];
+                    foreach ($t_links as $tl) {
+                        $tut = $DB->get_record('sepeservice_tutor_formador', ['id'=>$tl->id_tutor_formador]);
+                        if ($tut) {
+                            $tuts_xml[] = [
+                                'ID_TUTOR' => ['TIPO_DOCUMENTO'=>$tut->tipo_documento, 'NUM_DOCUMENTO'=>$tut->num_documento, 'LETRA_NIF'=>$tut->letra_nif],
+                                'ACREDITACION_TUTOR' => $tut->acreditacion_tutor,
+                                'EXPERIENCIA_PROFESIONAL' => $tut->experiencia_profesional,
+                                'COMPETENCIA_DOCENTE' => $tut->competencia_docente,
+                                'EXPERIENCIA_MODALIDAD_TELEFORMACION' => $tut->experiencia_modalidad_teleformacion,
+                                'FORMACION_MODALIDAD_TELEFORMACION' => $tut->formacion_modalidad_teleformacion
+                            ];
+                        }
                     }
-                    $result[$name][] = $childData;
-                } else {
-                    $result[$name] = $childData;
+                    if (!empty($tuts_xml)) $esp_node['TUTORES_FORMADORES']['TUTOR_FORMADOR'] = $tuts_xml;
                 }
+
+                // Uso
+                $uso_link = $DB->get_record('sepeservice_especialidad_uso', ['id_especialidad' => $esp->id]);
+                if ($uso_link) {
+                    $uso = $DB->get_record('sepeservice_uso', ['id' => $uso_link->id_uso]);
+                    if ($uso) {
+                        $uso_node = [];
+                        if ($uso->duracion_total_m > 0) $uso_node['HORARIO_MANANA'] = ['NUM_PARTICIPANTES'=>$uso->num_participantes_m, 'NUMERO_ACCESOS'=>$uso->num_accesos_m, 'DURACION_TOTAL'=>$uso->duracion_total_m];
+                        if ($uso->duracion_total_t > 0) $uso_node['HORARIO_TARDE'] = ['NUM_PARTICIPANTES'=>$uso->num_participantes_t, 'NUMERO_ACCESOS'=>$uso->num_accesos_t, 'DURACION_TOTAL'=>$uso->duracion_total_t];
+                        if ($uso->duracion_total_n > 0) $uso_node['HORARIO_NOCHE'] = ['NUM_PARTICIPANTES'=>$uso->num_participantes_n, 'NUMERO_ACCESOS'=>$uso->num_accesos_n, 'DURACION_TOTAL'=>$uso->duracion_total_n];
+                        $uso_node['SEGUIMIENTO_EVALUACION'] = [
+                            'NUM_PARTICIPANTES' => $uso->num_participantes,
+                            'NUMERO_ACTIVIDADES_APRENDIZAJE' => $uso->numero_actividades_aprendizaje,
+                            'NUMERO_INTENTOS' => $uso->numero_intentos,
+                            'NUMERO_ACTIVIDADES_EVALUACION' => $uso->numero_actividades_evaluacion
+                        ];
+                        $esp_node['USO'] = $uso_node;
+                    }
+                }
+
+                $esp_xml[] = $esp_node;
             }
         }
-        
-        // Caso borde: nodo vacío o solo atributos (no manejamos atributos en este modelo SEPE)
-        if (empty($result) && $node->nodeValue !== '') {
-            return $node->nodeValue;
-        }
+        if (!empty($esp_xml)) $result['ESPECIALIDADES_ACCION']['ESPECIALIDAD'] = $esp_xml;
 
+        // 12. PARTICIPANTES (Simulado para que no rompa si no hay)
+        // Puedes implementar la lectura completa de participantes aquí si es necesario
+        
         return $result;
     }
 
-    /**
-     * Convierte recursivamente un Array PHP a Nodos XML.
-     * @param array|string $data Datos a convertir
-     * @param DOMElement $parent Nodo padre donde adjuntar
-     * @param DOMDocument $dom Documento para crear elementos
-     */
-    private function array_to_xml($data, DOMElement $parent, DOMDocument $dom) {
-        if (!is_array($data)) {
-            $parent->nodeValue = htmlspecialchars((string)$data);
-            return;
-        }
+    public function eliminar_accion($id_accion_data) {
+        global $DB;
+        $codigo = $id_accion_data['CODIGO_ACCION'] ?? '';
+        $accion = $DB->get_record('sepeservice_accion_formativa', ['codigo_accion' => $codigo]);
 
-        foreach ($data as $key => $value) {
-            // Si la clave es numérica, significa que el padre es una lista (ej: CENTRO_PRESENCIAL)
-            // y $value es un ítem. El nodo padre ya se creó fuera, esto no debería pasar
-            // si llamamos a la función correctamente iterando fuera.
-            // Pero para seguridad en estructuras anidadas profundas:
+        if (!$accion) throw new \Exception("Acción no encontrada.");
+
+        $transaction = $DB->start_delegated_transaction();
+        try {
+            $DB->delete_records('sepeservice_accion_especialidad', ['id_accion_formativa' => $accion->id]);
+            $DB->delete_records('sepeservice_accion_especialidad_tutor', ['id_accion_formativa' => $accion->id]);
+            $DB->delete_records('sepeservice_uso', ['id_accion_formativa' => $accion->id]);
+            $DB->delete_records('sepeservice_participante', ['id_accion_formativa' => $accion->id]);
+            $DB->delete_records('sepeservice_accion_formativa', ['id' => $accion->id]);
+            $transaction->allow_commit();
+        } catch (\Exception $e) {
+            $transaction->rollback($e);
+            throw $e;
+        }
+    }
+
+    public function obtener_lista_acciones() {
+        global $DB;
+        $acciones = $DB->get_records('sepeservice_accion_formativa', null, '', 'origen_accion, codigo_accion');
+        $lista = [];
+        foreach ($acciones as $a) {
+            $lista[] = ['ORIGEN_ACCION' => $a->origen_accion, 'CODIGO_ACCION' => $a->codigo_accion];
+        }
+        return $lista;
+    }
+
+    // =========================================================================
+    // MÉTODOS PRIVADOS DE PROCESAMIENTO (LOGICA INTERNA COMPLETA)
+    // =========================================================================
+
+    private function _procesar_especialidades($id_accion, $id_centro_local, $lista) {
+        global $DB;
+        foreach ($lista as $esp_data) {
+            $esp = new \stdClass();
+            $id_esp = $esp_data['ID_ESPECIALIDAD'] ?? [];
             
-            if (is_numeric($key)) {
-                // Esto ocurre si pasamos un array indexado a procesar.
-                // No deberíamos llegar aquí si la estructura del array es correcta
-                // (clave => valor), pero si pasa, es difícil inferir el nombre del tag.
-                // Asumimos que la lógica de negocio controla las iteraciones.
-                continue; 
+            $esp->origen_especialidad = $id_esp['ORIGEN_ESPECIALIDAD'] ?? '';
+            $esp->area_profesional    = $id_esp['AREA_PROFESIONAL'] ?? '';
+            $esp->codigo_especialidad = $id_esp['CODIGO_ESPECIALIDAD'] ?? '';
+            $esp->id_centro           = $id_centro_local;
+            $esp->fecha_inicio        = $esp_data['FECHA_INICIO'] ?? '';
+            $esp->fecha_fin           = $esp_data['FECHA_FIN'] ?? '';
+            $esp->modalidad_imparticion = $esp_data['MODALIDAD_IMPARTICION'] ?? '';
+            
+            $dur = $esp_data['DATOS_DURACION'] ?? [];
+            $esp->horas_presencial    = (int)($dur['HORAS_PRESENCIAL'] ?? 0);
+            $esp->horas_teleformacion = (int)($dur['HORAS_TELEFORMACION'] ?? 0);
+
+            $existing = $DB->get_record('sepeservice_especialidad', [
+                'codigo_especialidad' => $esp->codigo_especialidad,
+                'id_centro' => $id_centro_local
+            ]);
+            
+            if ($existing) {
+                $esp->id = $existing->id;
+                $DB->update_record('sepeservice_especialidad', $esp);
+                $id_especialidad = $esp->id;
+            } else {
+                $esp->fecha_creacion = time();
+                $id_especialidad = $DB->insert_record('sepeservice_especialidad', $esp);
             }
 
-            // Caso: Valor es array indexado (Lista de elementos repetidos)
-            // Ej: 'CENTRO_PRESENCIAL' => [ [...], [...] ]
-            if (is_array($value) && isset($value[0])) {
-                foreach ($value as $item) {
-                    $subnode = $dom->createElement($key);
-                    $this->array_to_xml($item, $subnode, $dom);
-                    $parent->appendChild($subnode);
+            // Vínculo Accion-Especialidad
+            if (!$DB->record_exists('sepeservice_accion_especialidad', ['id_accion_formativa'=>$id_accion, 'id_especialidad'=>$id_especialidad])) {
+                $DB->insert_record('sepeservice_accion_especialidad', [
+                    'id_accion_formativa' => $id_accion, 
+                    'id_especialidad' => $id_especialidad
+                ]);
+            }
+
+            // Procesar Centros Presenciales
+            if (!empty($esp_data['CENTROS_SESIONES_PRESENCIALES']['CENTRO_PRESENCIAL'])) {
+                $cps = $this->_normalize_array($esp_data['CENTROS_SESIONES_PRESENCIALES']['CENTRO_PRESENCIAL']);
+                foreach ($cps as $cp_data) {
+                    $this->_procesar_centro_presencial($id_especialidad, $cp_data);
                 }
-            } 
-            // Caso: Valor es array asociativo (Objeto hijo único) o valor simple
-            else {
-                // Omitir valores nulos o vacíos si se desea limpiar el XML (opcional)
-                if ($value === null) continue;
-                
-                $subnode = $dom->createElement($key);
-                $this->array_to_xml($value, $subnode, $dom);
-                $parent->appendChild($subnode);
+            }
+
+            // Procesar Tutores
+            if (!empty($esp_data['TUTORES_FORMADORES']['TUTOR_FORMADOR'])) {
+                $tuts = $this->_normalize_array($esp_data['TUTORES_FORMADORES']['TUTOR_FORMADOR']);
+                foreach ($tuts as $t_data) {
+                    $this->_procesar_tutor($id_accion, $id_especialidad, $t_data);
+                }
+            }
+
+            // Procesar Uso
+            if (!empty($esp_data['USO'])) {
+                $this->_procesar_uso($id_accion, $id_especialidad, $esp_data['USO']);
             }
         }
+    }
+
+    private function _procesar_centro_presencial($id_especialidad, $cp_data) {
+        global $DB;
+        $cp = new \stdClass();
+        $cp->origen_centro = $cp_data['ORIGEN_CENTRO'] ?? '';
+        $cp->codigo_centro = $cp_data['CODIGO_CENTRO'] ?? '';
+
+        if (empty($cp->codigo_centro)) return;
+
+        $existing = $DB->get_record('sepeservice_centro_presencial', ['codigo_centro' => $cp->codigo_centro]);
+        if ($existing) {
+            $id_cp = $existing->id;
+        } else {
+            $cp->fecha_creacion = time();
+            $id_cp = $DB->insert_record('sepeservice_centro_presencial', $cp);
+        }
+
+        if (!$DB->record_exists('sepeservice_especialidad_centro', ['id_especialidad'=>$id_especialidad, 'id_centro_presencial'=>$id_cp])) {
+            $DB->insert_record('sepeservice_especialidad_centro', ['id_especialidad'=>$id_especialidad, 'id_centro_presencial'=>$id_cp]);
+        }
+    }
+
+    private function _procesar_tutor($id_accion, $id_especialidad, $t_data) {
+        global $DB;
+        $id_w = $t_data['ID_TUTOR'] ?? [];
+        
+        $t = new \stdClass();
+        $t->tipo_documento = $id_w['TIPO_DOCUMENTO'] ?? '';
+        $t->num_documento  = $id_w['NUM_DOCUMENTO'] ?? '';
+        $t->letra_nif      = $id_w['LETRA_NIF'] ?? '';
+        $t->acreditacion_tutor          = $t_data['ACREDITACION_TUTOR'] ?? '';
+        $t->experiencia_profesional     = $t_data['EXPERIENCIA_PROFESIONAL'] ?? '0';
+        $t->competencia_docente         = $t_data['COMPETENCIA_DOCENTE'] ?? '';
+        $t->experiencia_modalidad_teleformacion = $t_data['EXPERIENCIA_MODALIDAD_TELEFORMACION'] ?? '';
+        $t->formacion_modalidad_teleformacion   = $t_data['FORMACION_MODALIDAD_TELEFORMACION'] ?? '';
+
+        if (empty($t->num_documento)) return;
+
+        $existing = $DB->get_record('sepeservice_tutor_formador', ['num_documento' => $t->num_documento]);
+        if ($existing) {
+            $t->id = $existing->id;
+            $DB->update_record('sepeservice_tutor_formador', $t);
+            $id_tutor = $existing->id;
+        } else {
+            $t->fecha_creacion = time();
+            $id_tutor = $DB->insert_record('sepeservice_tutor_formador', $t);
+        }
+
+        if (!$DB->record_exists('sepeservice_accion_especialidad_tutor', ['id_accion_formativa'=>$id_accion, 'id_especialidad'=>$id_especialidad, 'id_tutor_formador'=>$id_tutor])) {
+            $DB->insert_record('sepeservice_accion_especialidad_tutor', [
+                'id_accion_formativa'=>$id_accion, 'id_especialidad'=>$id_especialidad, 'id_tutor_formador'=>$id_tutor
+            ]);
+        }
+    }
+
+    private function _procesar_uso($id_accion, $id_especialidad, $u_data) {
+        global $DB;
+        $uso = new \stdClass();
+        $uso->id_accion_formativa = $id_accion;
+        
+        $map = ['HORARIO_MANANA'=>'_m', 'HORARIO_TARDE'=>'_t', 'HORARIO_NOCHE'=>'_n'];
+        foreach ($map as $tag => $suf) {
+            if (isset($u_data[$tag])) {
+                $uso->{"num_participantes$suf"} = (int)($u_data[$tag]['NUM_PARTICIPANTES'] ?? 0);
+                $uso->{"num_accesos$suf"}       = (int)($u_data[$tag]['NUMERO_ACCESOS'] ?? 0);
+                $uso->{"duracion_total$suf"}    = (int)($u_data[$tag]['DURACION_TOTAL'] ?? 0);
+            }
+        }
+        
+        if (isset($u_data['SEGUIMIENTO_EVALUACION'])) {
+            $seg = $u_data['SEGUIMIENTO_EVALUACION'];
+            $uso->num_participantes = (int)($seg['NUM_PARTICIPANTES'] ?? 0);
+            $uso->numero_actividades_aprendizaje = (int)($seg['NUMERO_ACTIVIDADES_APRENDIZAJE'] ?? 0);
+            $uso->numero_intentos = (int)($seg['NUMERO_INTENTOS'] ?? 0);
+            $uso->numero_actividades_evaluacion = (int)($seg['NUMERO_ACTIVIDADES_EVALUACION'] ?? 0);
+        }
+
+        $uso->fecha_creacion = time();
+        $id_uso = $DB->insert_record('sepeservice_uso', $uso);
+
+        $DB->insert_record('sepeservice_especialidad_uso', ['id_especialidad' => $id_especialidad, 'id_uso' => $id_uso]);
+    }
+
+    private function _procesar_participantes($id_accion, $lista) {
+        global $DB;
+        foreach ($lista as $p_data) {
+            $part = new \stdClass();
+            $id_p = $p_data['ID_PARTICIPANTE'] ?? [];
+            $part->tipo_documento = $id_p['TIPO_DOCUMENTO'] ?? '';
+            $part->num_documento  = $id_p['NUM_DOCUMENTO'] ?? '';
+            $part->letra_nif      = $id_p['LETRA_NIF'] ?? '';
+            $part->indicador_competencias_clave = $p_data['INDICADOR_COMPETENCIAS_CLAVE'] ?? '0';
+            $part->id_accion_formativa = $id_accion;
+
+            $existing = $DB->get_record('sepeservice_participante', [
+                'num_documento' => $part->num_documento, 
+                'id_accion_formativa' => $id_accion
+            ]);
+            
+            if ($existing) {
+                $part->id = $existing->id;
+                $DB->update_record('sepeservice_participante', $part);
+            } else {
+                $part->fecha_creacion = time();
+                $DB->insert_record('sepeservice_participante', $part);
+            }
+        }
+    }
+
+    private function _normalize_array($node) {
+        if (empty($node)) return [];
+        if (isset($node[0])) return $node;
+        return [$node];
     }
 }
